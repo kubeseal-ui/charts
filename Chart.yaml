@@ -1,0 +1,25 @@
+apiVersion: v2
+name: kubeseal-ui
+description: Team-oriented administration interface for Git-managed Kubernetes SealedSecrets
+type: application
+# Chart version. Bump per chart change per SemVer.
+version: 0.1.0
+# Application version. Tracks the kubeseal-ui/api release that ships in this
+# chart. The kubeseal-ui/frontend image is intentionally a separate version
+# in values.yaml because the frontend and backend release on independent
+# cadences.
+appVersion: "0.1.0-dev"
+keywords:
+  - sealed-secrets
+  - secret-management
+  - gitops
+  - oidc
+home: https://github.com/kubeseal-ui/charts
+sources:
+  - https://github.com/kubeseal-ui/api
+  - https://github.com/kubeseal-ui/frontend
+maintainers:
+  - name: yoganovvaindra
+    email: yoga.november2000@gmail.com
+icon: https://raw.githubusercontent.com/kubeseal-ui/api/main/docs/assets/logo.png
+kubeVersion: ">=1.27.0-0"

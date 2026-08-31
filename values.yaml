@@ -1,0 +1,93 @@
+# Default values for kubeseal-ui.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# API server (Go backend).
+api:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  image:
+    repository: ghcr.io/kubeseal-ui/api
+    tag: ""       # defaults to .Chart.AppVersion when empty
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+    capabilities:
+      drop:
+        - ALL
+  # OIDC + capability configuration lives in the values contract documented
+  # in internal-docs/deployment/helm.md. MVP renders the deployment only;
+  # env wiring lands in a subsequent phase.
+  env:
+    OIDC_ISSUER: ""
+    OIDC_CLIENT_ID: ""
+    LOG_LEVEL: info
+  probes:
+    liveness:
+      path: /healthz
+    readiness:
+      path: /readyz
+
+# UI server (Vue 3 frontend served by nginx).
+ui:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  image:
+    repository: ghcr.io/kubeseal-ui/frontend
+    tag: ""       # defaults to .Chart.AppVersion when empty
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+    capabilities:
+      drop:
+        - ALL
+
+# Worktree mounts for the API server's Git operations. The API clones the
+# SealedSecrets repo into an emptyDir so writes stay ephemeral.
+worktree:
+  emptyDir:
+    sizeLimit: 1Gi

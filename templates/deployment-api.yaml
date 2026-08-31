@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeseal-ui.apiName" . }}
+  labels:
+{{ include "kubeseal-ui.labels" . | nindent 4 }}
+spec:
+{{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicaCount }}
+{{- end }}
+  selector:
+    matchLabels:
+{{ include "kubeseal-ui.api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "kubeseal-ui.api.selectorLabels" . | nindent 8 }}
+    spec:
+{{- with .Values.api.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | nindent 8 }}
+{{- end }}
+      securityContext:
+{{ toYaml .Values.api.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ default .Chart.AppVersion (default "" .Values.api.image.tag) }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+{{ toYaml .Values.api.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: KUBESEAL_API_PORT
+              value: "8080"
+            - name: LOG_LEVEL
+              value: {{ .Values.api.env.LOG_LEVEL | quote }}
+            - name: OIDC_ISSUER
+              value: {{ .Values.api.env.OIDC_ISSUER | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.api.env.OIDC_CLIENT_ID | quote }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.api.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.api.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+{{ toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - name: worktree
+              mountPath: /tmp/kubeseal-ui
+      volumes:
+        - name: worktree
+          emptyDir:
+            sizeLimit: {{ .Values.worktree.emptyDir.sizeLimit }}
+      terminationGracePeriodSeconds: 30
