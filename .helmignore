@@ -17,3 +17,6 @@
 # Test artifacts
 ci/
 *.rendered.yaml
+# CI / downloaded tooling (defensive)
+*.tar.gz
+wget-log*

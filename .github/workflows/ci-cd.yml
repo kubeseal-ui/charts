@@ -30,9 +30,9 @@ jobs:
 
     - name: Install kubeconform
       run: |
-        wget -q https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
-        tar -xzf kubeconform-linux-amd64.tar.gz
-        sudo mv kubeconform /usr/local/bin/
+        wget -q https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz -O /tmp/kubeconform.tar.gz
+        tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+        sudo mv /tmp/kubeconform /usr/local/bin/
 
     - name: Lint Helm chart
       run: |
