@@ -9,7 +9,7 @@ api:
     enabled: false
   image:
     repository: ghcr.io/kubeseal-ui/api
-    tag: ""       # defaults to .Chart.AppVersion when empty
+    tag: ""
     pullPolicy: IfNotPresent
   imagePullSecrets: []
   service:
@@ -37,13 +37,13 @@ api:
     capabilities:
       drop:
         - ALL
-  # OIDC + capability configuration lives in the values contract documented
-  # in internal-docs/deployment/helm.md. MVP renders the deployment only;
-  # env wiring lands in a subsequent phase.
   env:
     OIDC_ISSUER: ""
     OIDC_CLIENT_ID: ""
     LOG_LEVEL: info
+  enableDecrypt: false
+  controllerNamespace: cluster
+  activeKeyLabel: sealedsecrets.bitnami.com/sealed-secrets-key
   probes:
     liveness:
       path: /healthz
@@ -57,7 +57,7 @@ ui:
     enabled: false
   image:
     repository: ghcr.io/kubeseal-ui/frontend
-    tag: ""       # defaults to .Chart.AppVersion when empty
+    tag: ""
     pullPolicy: IfNotPresent
   imagePullSecrets: []
   service:
@@ -86,8 +86,6 @@ ui:
       drop:
         - ALL
 
-# Worktree mounts for the API server's Git operations. The API clones the
-# SealedSecrets repo into an emptyDir so writes stay ephemeral.
 worktree:
   emptyDir:
     sizeLimit: 1Gi
