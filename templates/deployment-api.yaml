@@ -16,6 +16,7 @@ spec:
       labels:
 {{ include "kubeseal-ui.api.selectorLabels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "kubeseal-ui.apiName" . }}
 {{- with .Values.api.imagePullSecrets }}
       imagePullSecrets:
 {{ toYaml . | nindent 8 }}
@@ -41,6 +42,12 @@ spec:
               value: {{ .Values.api.env.OIDC_ISSUER | quote }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.api.env.OIDC_CLIENT_ID | quote }}
+            - name: ENABLE_DECRYPT
+              value: {{ .Values.api.enableDecrypt | quote }}
+            - name: KUBESEAL_CONTROLLER_NAMESPACE
+              value: {{ .Values.api.controllerNamespace | quote }}
+            - name: KUBESEAL_ACTIVE_KEY_LABEL
+              value: {{ .Values.api.activeKeyLabel | quote }}
           livenessProbe:
             httpGet:
               path: {{ .Values.api.probes.liveness.path }}
