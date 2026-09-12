@@ -1,3 +1,4 @@
+{{- include "kubeseal-ui.gitops.validate" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,6 +49,16 @@ spec:
               value: {{ .Values.api.controllerNamespace | quote }}
             - name: KUBESEAL_ACTIVE_KEY_LABEL
               value: {{ .Values.api.activeKeyLabel | quote }}
+            - name: GITOPS_ENABLED
+              value: {{ .Values.api.gitops.enabled | quote }}
+            - name: GITOPS_AUTHOR_NAME
+              value: {{ .Values.api.gitops.authorName | quote }}
+            - name: GITOPS_AUTHOR_EMAIL
+              value: {{ .Values.api.gitops.authorEmail | quote }}
+            - name: GITOPS_WORKTREE_DIR
+              value: {{ .Values.api.gitops.worktreeDir | quote }}
+            - name: GITOPS_CREDENTIAL_REFS
+              value: {{ include "kubeseal-ui.gitopsCredentialRefs" . | quote }}
           livenessProbe:
             httpGet:
               path: {{ .Values.api.probes.liveness.path }}
@@ -69,8 +80,22 @@ spec:
           volumeMounts:
             - name: worktree
               mountPath: /tmp/kubeseal-ui
+            {{- if .Values.api.gitops.enabled }}
+            {{- range .Values.api.gitops.credentials }}
+            {{- if .tokenFile }}
+            - name: git-credentials
+              mountPath: {{ dir .tokenFile }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+            {{- end }}
       volumes:
         - name: worktree
           emptyDir:
             sizeLimit: {{ .Values.worktree.emptyDir.sizeLimit }}
+        {{- if and .Values.api.gitops.enabled .Values.api.gitops.credentialSecretName }}
+        - name: git-credentials
+          secret:
+            secretName: {{ .Values.api.gitops.credentialSecretName }}
+        {{- end }}
       terminationGracePeriodSeconds: 30

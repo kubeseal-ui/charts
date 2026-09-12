@@ -50,6 +50,38 @@ api:
     readiness:
       path: /readyz
 
+  # GitOps delivery (phase 4): go-git transport with typed credentials.
+  # Disabled boots keep the delivery endpoints fail-closed.
+  gitops:
+    enabled: false
+    authorName: kubeseal-ui
+    authorEmail: ""
+    worktreeDir: /tmp/kubeseal-ui/gitops
+    # Typed, file-backed credentials. Each entry needs:
+    #   authRef    - the policy mapping's auth reference
+    #   mode       - https-token | ssh-agent | none
+    #   username   - Basic username (https-token); optional
+    #   tokenFile  - path to the Secret-mounted token; required for https-token
+    # The token file is read per call, so rotating the Secret takes
+    # effect without a restart. Tokens never live in values.yaml.
+    credentials: []
+    # - authRef: platform-repo
+    #   mode: https-token
+    #   username: kubeseal-ui
+    #   tokenFile: /var/run/secrets/git/platform/token
+    # Namespaced Git policies: one entry per namespace. Clients never
+    # choose repository, branch, path, or mode — these are the only
+    # server-side sources.
+    namespaces: []
+    # - namespace: payments
+    #   repository: org/platform-repo
+    #   branch: main
+    #   pathTemplate: clusters/{namespace}/{name}.yaml
+    #   authRef: platform-repo
+    #   mode: direct            # direct | proposal
+    #   # proposalAdapter: github-pr   # required when mode is proposal
+    credentialSecretName: ""
+
 # UI server (Vue 3 frontend served by nginx).
 ui:
   replicaCount: 1

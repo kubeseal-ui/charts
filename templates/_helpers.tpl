@@ -57,3 +57,55 @@ app.kubernetes.io/component: api
 {{ include "kubeseal-ui.selectorLabels" . }}
 app.kubernetes.io/component: ui
 {{- end }}
+
+{{/*
+Serialize the typed gitops credential list into the
+auth_ref:mode:username:token_file entries consumed by
+GITOPS_CREDENTIAL_REFS. Token values never appear here —
+only the Secret-mounted file paths.
+*/}}
+{{- define "kubeseal-ui.gitopsCredentialRefs" -}}
+{{- $entries := list -}}
+{{- range .Values.api.gitops.credentials -}}
+{{- $username := default "" .username -}}
+{{- $entries = append $entries (printf "%s:%s:%s:%s" .authRef .mode $username .tokenFile) -}}
+{{- end -}}
+{{- join "," $entries -}}
+{{- end -}}
+
+{{/*
+Fail the render when gitops is enabled without the pieces it needs:
+at least one namespace mapping, credentials for every mapped authRef,
+and a Secret to mount them from.
+*/}}
+{{- define "kubeseal-ui.gitops.validate" -}}
+{{- if .Values.api.gitops.enabled -}}
+{{- if not .Values.api.gitops.namespaces -}}
+{{- fail "api.gitops.enabled requires api.gitops.namespaces" -}}
+{{- end -}}
+{{- $creds := dict -}}
+{{- range .Values.api.gitops.credentials -}}
+{{- $_ := set $creds .authRef . -}}
+{{- if and (eq .mode "https-token") (not .tokenFile) -}}
+{{- fail (printf "credential %s: https-token requires tokenFile" .authRef) -}}
+{{- end -}}
+{{- if and (ne .mode "https-token") (ne .mode "ssh-agent") (ne .mode "none") -}}
+{{- fail (printf "credential %s: unknown mode %s" .authRef .mode) -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.api.gitops.namespaces -}}
+{{- if not (hasKey $creds .authRef) -}}
+{{- fail (printf "namespace %s: no credential for authRef %s" .namespace .authRef) -}}
+{{- end -}}
+{{- if and (ne .mode "direct") (ne .mode "proposal") -}}
+{{- fail (printf "namespace %s: mode must be direct or proposal" .namespace) -}}
+{{- end -}}
+{{- if and (eq .mode "proposal") (not (hasKey . "proposalAdapter")) -}}
+{{- fail (printf "namespace %s: proposal mode requires proposalAdapter" .namespace) -}}
+{{- end -}}
+{{- end -}}
+{{- if not .Values.api.gitops.credentialSecretName -}}
+{{- fail "api.gitops.enabled requires api.gitops.credentialSecretName" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
