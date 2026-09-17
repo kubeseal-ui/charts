@@ -3,12 +3,13 @@ name: kubeseal-ui
 description: Team-oriented administration interface for Git-managed Kubernetes SealedSecrets
 type: application
 # Chart version. Bump per chart change per SemVer.
-version: 0.1.0
+version: 0.2.0
 # Application version. Tracks the kubeseal-ui/api release that ships in this
 # chart. The kubeseal-ui/frontend image is intentionally a separate version
 # in values.yaml because the frontend and backend release on independent
-# cadences.
-appVersion: "0.1.0-dev"
+# cadences. Both tags default to this value, which is a development marker
+# with no published image: pin api.image.tag and ui.image.tag per environment.
+appVersion: "0.2.0-dev"
 keywords:
   - sealed-secrets
   - secret-management

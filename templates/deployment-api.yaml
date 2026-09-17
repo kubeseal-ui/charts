@@ -59,6 +59,14 @@ spec:
               value: {{ .Values.api.gitops.worktreeDir | quote }}
             - name: GITOPS_CREDENTIAL_REFS
               value: {{ include "kubeseal-ui.gitopsCredentialRefs" . | quote }}
+            {{- if .Values.api.gitops.enabled }}
+            - name: GITOPS_NAMESPACES
+              value: {{ include "kubeseal-ui.gitopsNamespaceSpecs" . | quote }}
+            {{- if .Values.api.gitops.proposalAdapters }}
+            - name: GITOPS_PROPOSAL_ADAPTERS
+              value: {{ include "kubeseal-ui.gitopsProposalAdapters" . | quote }}
+            {{- end }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: {{ .Values.api.probes.liveness.path }}
@@ -88,6 +96,13 @@ spec:
               readOnly: true
             {{- end }}
             {{- end }}
+            {{- range .Values.api.gitops.proposalAdapters }}
+            {{- if .tokenFile }}
+            - name: git-proposal-credentials
+              mountPath: {{ dir .tokenFile }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
             {{- end }}
       volumes:
         - name: worktree
@@ -97,5 +112,10 @@ spec:
         - name: git-credentials
           secret:
             secretName: {{ .Values.api.gitops.credentialSecretName }}
+        {{- end }}
+        {{- if and .Values.api.gitops.enabled .Values.api.gitops.proposalAdapters }}
+        - name: git-proposal-credentials
+          secret:
+            secretName: {{ include "kubeseal-ui.gitopsProposalSecretName" . }}
         {{- end }}
       terminationGracePeriodSeconds: 30

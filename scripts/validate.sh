@@ -58,3 +58,140 @@ assert_rendered 'readinessProbe:' 'readiness probe on at least one container'
 assert_rendered 'app.kubernetes.io/version' 'app.kubernetes.io/version label'
 
 printf 'validate.sh: rendered contract checks passed\n'
+
+# --- GitOps delivery fixtures -------------------------------------------
+# Direct + proposal namespace mapping, typed credentials, and a github-pr
+# proposal adapter. Pins the GITOPS_* env contract and the Secret mounts
+# that carry the token files.
+
+GITOPS_VALUES="$(mktemp)"
+NETPOL_VALUES="$(mktemp)"
+BAD_ADAPTER_VALUES="$(mktemp)"
+BAD_NETPOL_VALUES="$(mktemp)"
+trap 'rm -f "${RENDERED}" "${GITOPS_VALUES}" "${NETPOL_VALUES}" "${BAD_ADAPTER_VALUES}" "${BAD_NETPOL_VALUES}"' EXIT
+
+cat > "${GITOPS_VALUES}" <<'EOF'
+api:
+  env:
+    OIDC_ISSUER: https://auth.example.com
+    OIDC_CLIENT_ID: kubeseal-ui
+  enableDecrypt: false
+  gitops:
+    enabled: true
+    authorName: kubeseal-ui
+    authorEmail: kubeseal-ui@example.com
+    credentials:
+      - authRef: platform-repo
+        mode: https-token
+        username: kubeseal-ui
+        tokenFile: /var/run/secrets/git/platform/token
+    namespaces:
+      - namespace: payments
+        repository: org/platform-repo
+        branch: main
+        pathTemplate: clusters/{namespace}/{name}.yaml
+        authRef: platform-repo
+        mode: direct
+      - namespace: staging
+        repository: org/platform-repo
+        branch: main
+        pathTemplate: clusters/{namespace}/{name}.yaml
+        authRef: platform-repo
+        mode: proposal
+        proposalAdapter: github-pr
+    proposalAdapters:
+      - name: github-pr
+        type: github
+        tokenFile: /var/run/secrets/git/proposal/token
+        baseUrl: https://github.example.com/api/v3
+    credentialSecretName: kubeseal-ui-git
+    proposalCredentialSecretName: kubeseal-ui-proposal
+EOF
+
+GITOPS_RENDERED="$(mktemp)"
+helm template test-release "${CHART_DIR}" -f "${GITOPS_VALUES}" > "${GITOPS_RENDERED}"
+
+assert_gitops_rendered() {
+    local pattern="$1"
+    local description="$2"
+    if ! grep -Fq "${pattern}" "${GITOPS_RENDERED}"; then
+        printf 'error: gitops render missing %s\n' "${description}" >&2
+        printf 'Searching for: %s\n' "${pattern}" >&2
+        exit 1
+    fi
+}
+
+assert_gitops_rendered 'name: GITOPS_NAMESPACES' 'GITOPS_NAMESPACES env'
+assert_gitops_rendered 'payments:org/platform-repo:main:clusters-{namespace}-{name}.yaml:platform-repo:direct' 'direct namespace mapping'
+assert_gitops_rendered 'staging:org/platform-repo:main:clusters-{namespace}-{name}.yaml:platform-repo:proposal:github-pr' 'proposal namespace mapping with adapter name'
+assert_gitops_rendered 'github-pr:github:/var/run/secrets/git/proposal/token:https://github.example.com/api/v3' 'proposal adapter spec'
+assert_gitops_rendered 'secretName: kubeseal-ui-proposal' 'proposal credential Secret volume'
+assert_gitops_rendered 'mountPath: /var/run/secrets/git/proposal' 'proposal token mount path'
+assert_gitops_rendered 'name: GITOPS_CREDENTIAL_REFS' 'GITOPS_CREDENTIAL_REFS env'
+
+# A proposal namespace that names an adapter the values never declare must
+# fail the render rather than booting an API that cannot open proposals.
+printf '%s\n' "api:" "  gitops:" "    enabled: true" \
+    "    credentials:" "      - authRef: platform-repo" \
+    "        mode: https-token" "        username: kubeseal-ui" \
+    "        tokenFile: /var/run/secrets/git/platform/token" \
+    "    namespaces:" "      - namespace: staging" "        repository: org/platform-repo" \
+    "        branch: main" "        pathTemplate: clusters/{namespace}/{name}.yaml" \
+    "        authRef: platform-repo" "        mode: proposal" \
+    "        proposalAdapter: github-pr" \
+    "    credentialSecretName: kubeseal-ui-git" > "${BAD_ADAPTER_VALUES}"
+if helm template test-release "${CHART_DIR}" -f "${BAD_ADAPTER_VALUES}" > /dev/null 2>&1; then
+    printf 'error: render succeeded with an undeclared proposal adapter\n' >&2
+    exit 1
+fi
+
+# --- NetworkPolicy fixture ----------------------------------------------
+cat > "${NETPOL_VALUES}" <<'EOF'
+networkPolicy:
+  enabled: true
+  egress:
+    cidrs:
+      - 10.43.0.1/32
+    namespaceSelectors:
+      - matchLabels:
+          kubernetes.io/metadata.name: git-system
+  api:
+    ingress:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+EOF
+
+NETPOL_RENDERED="$(mktemp)"
+trap 'rm -f "${RENDERED}" "${GITOPS_VALUES}" "${NETPOL_VALUES}" "${BAD_ADAPTER_VALUES}" "${BAD_NETPOL_VALUES}" "${GITOPS_RENDERED}" "${NETPOL_RENDERED}"' EXIT
+helm template test-release "${CHART_DIR}" -f "${NETPOL_VALUES}" > "${NETPOL_RENDERED}"
+
+assert_netpol_rendered() {
+    local pattern="$1"
+    local description="$2"
+    if ! grep -Fq "${pattern}" "${NETPOL_RENDERED}"; then
+        printf 'error: networkpolicy render missing %s\n' "${description}" >&2
+        printf 'Searching for: %s\n' "${pattern}" >&2
+        exit 1
+    fi
+}
+
+netpol_count="$(grep -c '^kind: NetworkPolicy$' "${NETPOL_RENDERED}" || true)"
+if [ "${netpol_count}" != "2" ]; then
+    printf 'error: expected 2 NetworkPolicy resources, found %s\n' "${netpol_count}" >&2
+    exit 1
+fi
+assert_netpol_rendered 'kubernetes.io/metadata.name: kube-system' 'DNS egress to the cluster DNS namespace'
+assert_netpol_rendered 'cidr: 10.43.0.1/32' 'operator-supplied egress CIDR'
+assert_netpol_rendered 'kubernetes.io/metadata.name: git-system' 'operator-supplied egress namespace selector'
+assert_netpol_rendered 'kubernetes.io/metadata.name: ingress-nginx' 'operator-supplied API ingress source'
+
+# The policy refuses to guess egress destinations; enabling it with none is
+# a configuration error, not a permissive default.
+printf '%s\n' "networkPolicy:" "  enabled: true" > "${BAD_NETPOL_VALUES}"
+if helm template test-release "${CHART_DIR}" -f "${BAD_NETPOL_VALUES}" > /dev/null 2>&1; then
+    printf 'error: render succeeded with networkPolicy enabled and no egress destinations\n' >&2
+    exit 1
+fi
+
+printf 'validate.sh: gitops and networkpolicy render checks passed\n'

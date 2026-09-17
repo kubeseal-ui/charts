@@ -81,6 +81,22 @@ api:
     #   mode: direct            # direct | proposal
     #   # proposalAdapter: github-pr   # required when mode is proposal
     credentialSecretName: ""
+    # Optional proposal adapters. A proposal namespace may only reference a
+    # name declared here; the render fails otherwise. Each entry needs:
+    #   name      - the name a namespace mapping references
+    #   type      - github (GitHub REST pull requests); more types may land
+    #   tokenFile - path to the Secret-mounted PAT; required
+    #   baseUrl   - optional API root override (GitHub Enterprise Server)
+    # The token file is read per call, so a rotated Secret takes effect
+    # without a restart. Tokens never live in values.yaml.
+    proposalAdapters: []
+    # - name: github-pr
+    #   type: github
+    #   tokenFile: /var/run/secrets/git/proposal/token
+    #   # baseUrl: https://github.example.com/api/v3
+    # Secret holding the proposal adapter tokens. Falls back to
+    # credentialSecretName when empty. Ignored when no adapter is declared.
+    proposalCredentialSecretName: ""
 
 # UI server (Vue 3 frontend served by nginx).
 ui:
@@ -117,6 +133,33 @@ ui:
     capabilities:
       drop:
         - ALL
+
+# NetworkPolicy for the API and UI pods (templates/networkpolicy.yaml).
+# Disabled by default: the egress destinations depend on the cluster.
+networkPolicy:
+  enabled: false
+  # Namespace running cluster DNS. Egress to it on 53 is always allowed.
+  dnsNamespace: kube-system
+  api:
+    # Ingress sources for the API port. Empty renders a rule with no
+    # sources, which allows every pod; set this to restrict traffic.
+    ingress: []
+    # - namespaceSelector:
+    #     matchLabels:
+    #       kubernetes.io/metadata.name: ingress-nginx
+  ui:
+    # Same contract as api.ingress, for the UI port.
+    ingress: []
+  egress:
+    # Required when the policy is enabled: the Kubernetes API, the OIDC
+    # issuer, the Git remotes, and the proposal APIs are environment
+    # specific, so the chart refuses to guess them.
+    cidrs: []
+    # - 10.43.0.1/32          # in-cluster API service
+    # - 203.0.113.10/32       # OIDC issuer
+    namespaceSelectors: []
+    # - matchLabels:
+    #     kubernetes.io/metadata.name: git-system
 
 worktree:
   emptyDir:
