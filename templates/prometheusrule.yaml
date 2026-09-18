@@ -1,0 +1,48 @@
+{{- if .Values.observability.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "kubeseal-ui.apiName" . }}
+  labels:
+{{ include "kubeseal-ui.labels" . | nindent 4 }}
+{{- with .Values.observability.prometheusRule.selector }}
+{{ toYaml . | nindent 4 }}
+{{- end }}
+spec:
+  groups:
+    - name: kubeseal-ui.api
+      rules:
+        - alert: KubesealUIHighErrorRate
+          expr: |
+            sum(rate(kubeseal_gui_http_requests_total{code=~"5.."}[5m]))
+              / sum(rate(kubeseal_gui_http_requests_total[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: kubeseal-ui API 5xx rate above 5% for 10 minutes
+        - alert: KubesealUIHighLatency
+          expr: |
+            histogram_quantile(0.99, sum(rate(kubeseal_gui_http_request_duration_seconds_bucket[5m])) by (le)) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: kubeseal-ui API p99 latency above 2s for 10 minutes
+        - alert: KubesealUIGitOpsPushFailing
+          expr: |
+            sum(increase(kubeseal_gui_gitops_delivery_total{result=~"failed|conflict|proposal_failed"}[30m])) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: more than 3 GitOps delivery failures in 30 minutes
+        - alert: KubesealUICryptoFailures
+          expr: |
+            sum(increase(kubeseal_gui_sealed_secret_operations_total{result="failed"}[15m])) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: more than 5 sealed-secret operation failures in 15 minutes
+{{- end }}

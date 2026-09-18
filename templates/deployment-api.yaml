@@ -51,6 +51,22 @@ spec:
               value: {{ .Values.api.activeKeyLabel | quote }}
             - name: GITOPS_ENABLED
               value: {{ .Values.api.gitops.enabled | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ trimPrefix "http://" .Values.observability.otlpEndpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ include "kubeseal-ui.apiName" . | quote }}
+            - name: OTEL_SERVICE_VERSION
+              value: {{ default .Chart.AppVersion (default "" .Values.api.image.tag) | quote }}
+            - name: OTEL_DEPLOYMENT_ENVIRONMENT
+              value: {{ .Release.Namespace | quote }}
+            {{- if .Values.observability.traceSampleRatio }}
+            - name: OTEL_TRACE_SAMPLE_RATIO
+              value: {{ .Values.observability.traceSampleRatio | quote }}
+            {{- end }}
+            {{- if .Values.observability.metricIntervalSeconds }}
+            - name: OTEL_METRIC_INTERVAL_SECONDS
+              value: {{ .Values.observability.metricIntervalSeconds | quote }}
+            {{- end }}
             - name: GITOPS_AUTHOR_NAME
               value: {{ .Values.api.gitops.authorName | quote }}
             - name: GITOPS_AUTHOR_EMAIL

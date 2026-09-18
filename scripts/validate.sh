@@ -195,3 +195,70 @@ if helm template test-release "${CHART_DIR}" -f "${BAD_NETPOL_VALUES}" > /dev/nu
 fi
 
 printf 'validate.sh: gitops and networkpolicy render checks passed\n'
+
+# --- Observability fixture ----------------------------------------------
+# ServiceMonitor + PrometheusRule render, the OTEL_* env contract, and the
+# metrics endpoint path. The /metrics exposition carries bounded labels
+# only, so it is safe to scrape unauthenticated.
+
+OBS_VALUES="$(mktemp)"
+OBS_RENDERED="$(mktemp)"
+trap 'rm -f "${RENDERED}" "${GITOPS_VALUES}" "${NETPOL_VALUES}" "${BAD_ADAPTER_VALUES}" "${BAD_NETPOL_VALUES}" "${GITOPS_RENDERED}" "${NETPOL_RENDERED}" "${OBS_VALUES}" "${OBS_RENDERED}"' EXIT
+
+cat > "${OBS_VALUES}" <<'EOF'
+observability:
+  serviceMonitor:
+    enabled: true
+    selector:
+      release: prometheus
+    interval: 30s
+    scrapeTimeout: 10s
+  prometheusRule:
+    enabled: true
+    selector:
+      release: prometheus
+  otlpEndpoint: http://otel-collector.observability.svc:4317
+  traceSampleRatio: "0.25"
+  metricIntervalSeconds: "15"
+EOF
+
+helm template test-release "${CHART_DIR}" -f "${OBS_VALUES}" > "${OBS_RENDERED}"
+
+assert_obs_rendered() {
+    local pattern="$1"
+    local description="$2"
+    if ! grep -Fq "${pattern}" "${OBS_RENDERED}"; then
+        printf 'error: observability render missing %s\n' "${description}" >&2
+        printf 'Searching for: %s\n' "${pattern}" >&2
+        exit 1
+    fi
+}
+
+obs_kinds="$(grep -c '^kind: ServiceMonitor$\|^kind: PrometheusRule$' "${OBS_RENDERED}" || true)"
+if [ "${obs_kinds}" != "2" ]; then
+    printf 'error: expected 1 ServiceMonitor + 1 PrometheusRule, found %s\n' "${obs_kinds}" >&2
+    exit 1
+fi
+assert_obs_rendered 'release: prometheus' 'operator selector label'
+assert_obs_rendered 'path: /metrics' 'metrics scrape path'
+assert_obs_rendered 'KubesealUIHighErrorRate' 'high error rate alert'
+assert_obs_rendered 'KubesealUIHighLatency' 'high latency alert'
+assert_obs_rendered 'KubesealUIGitOpsPushFailing' 'gitops push failing alert'
+assert_obs_rendered 'KubesealUICryptoFailures' 'crypto failures alert'
+assert_obs_rendered 'name: OTEL_EXPORTER_OTLP_ENDPOINT' 'OTLP endpoint env'
+assert_obs_rendered 'otel-collector.observability.svc:4317' 'collector endpoint with scheme stripped'
+assert_obs_rendered 'name: OTEL_TRACE_SAMPLE_RATIO' 'trace sampling env'
+assert_obs_rendered 'name: OTEL_METRIC_INTERVAL_SECONDS' 'metric interval env'
+assert_obs_rendered 'name: OTEL_SERVICE_NAME' 'service name env'
+assert_obs_rendered 'name: OTEL_SERVICE_VERSION' 'service version env'
+assert_obs_rendered 'name: OTEL_DEPLOYMENT_ENVIRONMENT' 'deployment environment env'
+
+# Without an endpoint the SDK must stay disabled: /metrics returns 503 and
+# the OTEL env vars render empty.
+DEFAULT_OTEL="$(grep -A1 'name: OTEL_EXPORTER_OTLP_ENDPOINT' "${RENDERED}" | tail -1)"
+if ! printf '%s' "${DEFAULT_OTEL}" | grep -Fq '""'; then
+    printf 'error: default render sets a non-empty OTEL endpoint\n' >&2
+    exit 1
+fi
+
+printf 'validate.sh: observability render checks passed\n'

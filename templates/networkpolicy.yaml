@@ -37,6 +37,20 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    {{- if .Values.observability.otlpEndpoint }}
+    # OTLP gRPC to the collector. The endpoint is operator-supplied, so
+    # the destination CIDR/selector comes from the networkPolicy block.
+    {{- with .Values.networkPolicy.egress.otlp }}
+    - to:
+      {{- range . }}
+        - ipBlock:
+            cidr: {{ . }}
+      {{- end }}
+      ports:
+        - protocol: TCP
+          port: 4317
+    {{- end }}
+    {{- end }}
     {{- with .Values.networkPolicy.egress.cidrs }}
     - to:
       {{- range . }}

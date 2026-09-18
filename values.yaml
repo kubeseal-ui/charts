@@ -160,6 +160,36 @@ networkPolicy:
     namespaceSelectors: []
     # - matchLabels:
     #     kubernetes.io/metadata.name: git-system
+    # OTLP collector destination (networkpolicy-only; the endpoint itself
+    # lives in observability.otlpEndpoint).
+    otlp: []
+    # - 10.43.0.20/32
+
+# Observability (templates/servicemonitor.yaml, templates/prometheusrule.yaml).
+# The API serves Prometheus text at /api.service.port + /metrics; traces and
+# logs go to the OTLP collector below.
+observability:
+  serviceMonitor:
+    enabled: false
+    # Label the Prometheus operator's ServiceMonitor selector matches.
+    selector: {}
+    # release: prometheus
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  prometheusRule:
+    enabled: false
+    selector: {}
+    # release: prometheus
+  # OTLP gRPC endpoint receiving metrics, traces, and logs (the collector
+  # Service). Empty disables the SDK: /metrics returns 503 and no network
+  # calls are made. Rendered as OTEL_EXPORTER_OTLP_ENDPOINT with the
+  # scheme stripped (gRPC takes host:port only).
+  otlpEndpoint: ""
+  # Trace sampling ratio (0 < r <= 1). Empty means 0.1.
+  traceSampleRatio: ""
+  # OTLP metrics push interval in seconds. Empty means 30.
+  metricIntervalSeconds: ""
 
 worktree:
   emptyDir:
