@@ -75,7 +75,7 @@ only the Secret-mounted file paths.
 
 {{/*
 Serialize the namespace gitops policy list into the
-namespace:repository:branch:path_template:auth_ref:mode[:adapter_name]
+namespace:repository:branch:path_template:auth_ref:mode[:adapter_name][:allowed_paths]
 entries consumed by GITOPS_NAMESPACES. Path templates serialize '/'
 as '-' so the ':' delimiter is unambiguous; the api's parseMappingSpecs
 restores the slashes. Tokens never appear here — only the server-side
@@ -88,6 +88,10 @@ policy fields.
 {{- $entry := printf "%s:%s:%s:%s:%s:%s" .namespace .repository .branch $path .authRef .mode -}}
 {{- if .proposalAdapter -}}
 {{- $entry = printf "%s:%s" $entry .proposalAdapter -}}
+{{- end -}}
+{{- if .allowedPaths -}}
+{{- $allowed := join "-" .allowedPaths -}}
+{{- $entry = printf "%s:%s" $entry $allowed -}}
 {{- end -}}
 {{- $entries = append $entries $entry -}}
 {{- end -}}

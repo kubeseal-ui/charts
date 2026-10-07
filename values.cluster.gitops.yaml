@@ -1,0 +1,40 @@
+# Homelab + GitOps overlay for kubeseal-ui.
+# gitops namespace mapping is a proposed default; adjust repo/branch/path
+# (see cluster/kubeseal-ui/README.md "GitOps delivery").
+api:
+  image:
+    repository: reg.ygnv.my.id/ghcr/kubeseal-ui/api
+    tag: "dev"
+    pullPolicy: IfNotPresent
+  env:
+    OIDC_ISSUER: "https://auth.ygnv.my.id/application/o/kubeseal-ui/"
+    OIDC_CLIENT_ID: "kubeseal-ui"
+    LOG_LEVEL: "info"
+  controllerNamespace: kube-system
+  gitops:
+    enabled: true
+    authorName: kubeseal-ui
+    authorEmail: "kubeseal-ui@ygnv.my.id"
+    worktreeDir: /tmp/kubeseal-ui/gitops
+    credentials:
+      - authRef: github
+        mode: https-token
+        username: yoganovvaindra
+        tokenFile: /var/run/secrets/git/platform/token
+    namespaces:
+      - namespace: cluster
+        repository: YogaNovvaindra/kube
+        branch: main
+        pathTemplate: cluster/sealed-secrets/{name}.yaml
+        allowedPaths:
+          - cluster/sealed-secrets/
+          - cluster/kubeseal-ui/
+          - cluster/sealed-secret/
+        authRef: github
+        mode: direct
+    credentialSecretName: kubeseal-cred
+ui:
+  image:
+    repository: reg.ygnv.my.id/ghcr/kubeseal-ui/frontend
+    tag: "dev"
+    pullPolicy: IfNotPresent
