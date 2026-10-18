@@ -1,21 +1,23 @@
 {{- if .Values.observability.serviceMonitor.enabled }}
-{{- $apiPort := .Values.api.service.port | int }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "kubeseal-ui.apiName" . }}
+  name: {{ include "kubeseal-ui.api.fullname" . }}
   labels:
-{{ include "kubeseal-ui.labels" . | nindent 4 }}
-{{- with .Values.observability.serviceMonitor.selector }}
-{{ toYaml . | nindent 4 }}
-{{- end }}
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+    {{- with .Values.observability.serviceMonitor.selector }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.observability.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   selector:
     matchLabels:
-{{ include "kubeseal-ui.api.selectorLabels" . | nindent 6 }}
+      {{- include "kubeseal-ui.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
   endpoints:
     - port: http
-      path: {{ .Values.observability.serviceMonitor.path }}
+      path: /metrics
       interval: {{ .Values.observability.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.observability.serviceMonitor.scrapeTimeout }}
 {{- end }}

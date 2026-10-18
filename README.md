@@ -25,11 +25,27 @@ ui:
     tag: sha-88088d3
 ```
 
+`/readyz` stays red until `SESSION_SIGNING_KEY` and the OIDC credentials are present. Keep secrets out of
+values and pass them through `api.extraEnv` with `valueFrom.secretKeyRef`:
+
+```yaml
+api:
+  extraEnv:
+    - name: OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef: { name: kubeseal-ui-oidc, key: client-secret }
+    - name: SESSION_SIGNING_KEY
+      valueFrom:
+        secretKeyRef: { name: kubeseal-ui-oidc, key: session-signing-key }
+```
+
 ## Values that fail the render
 
 The chart refuses to render a configuration it cannot serve, and CI (`scripts/validate.sh`) pins each case:
 
+- `api.enableDecrypt` absent (it has no default)
 - `api.gitops.enabled` with no namespace mappings
+- `api.gitops.worktreeDir` outside `api.worktree.mountPath` (the only writable directory)
 - a namespace `authRef` with no matching credential entry
 - `https-token` credentials with no `tokenFile`
 - an unknown credential mode
@@ -108,13 +124,34 @@ sources, which admits every pod; set them to restrict traffic.
 ## Validate
 
 ```bash
-helm lint .
-helm template test-release . > /dev/null
+helm lint . --set api.enableDecrypt=false
+helm template test-release . --set api.enableDecrypt=false > /dev/null
 bash scripts/validate.sh
 ```
 
-`validate.sh` renders the default, GitOps, and NetworkPolicy fixtures, asserts the `GITOPS_*` env contract and
-Secret mounts, and confirms the fail-closed cases above still fail.
+`api.enableDecrypt` has no default on purpose, so every render passes it explicitly. `validate.sh` renders
+the default, decrypt, GitOps, observability, and NetworkPolicy fixtures, asserts the rendered contract, and
+confirms the fail-closed cases above still fail.
+
+## Running deployment shape
+
+The chart reproduces the hand-written manifest: release name `kubeseal-ui`, namespace `cluster`, API Service
+`kubeseal-ui-api:8080`, UI Service `kubeseal-ui:80`. The API Service name is fixed at `kubeseal-ui-api` because
+the UI image's nginx config proxies `/api` there; only `api.service.name` changes it, and only for a rebuilt
+frontend image. Everything else follows the release name. To translate an existing manifest, map it as follows:
+
+| Manifest field | Value |
+| --- | --- |
+| `kubectl create secret` referenced by `OIDC_CLIENT_SECRET` / `SESSION_SIGNING_KEY` | `api.extraEnv` entries with `valueFrom.secretKeyRef` |
+| `CONFIG_PATH` + mounted ConfigMap `kubeseal-ui-authz` | `api.policy.existingConfigMap: kubeseal-ui-authz` |
+| `GITOPS_*` vars | `api.gitops.*` (the chart derives the env strings) |
+| Token Secrets mounted at `/var/run/secrets/git/...` | `api.gitops.credentialSecretName` / `proposalCredentialSecretName`; mount paths come from each `tokenFile` directory |
+| Controller-key Role in namespace `cluster` | `api.enableDecrypt: true` (renders Role/RoleBinding in `api.controllerNamespace`) |
+| Worktree emptyDir at `/tmp/kubeseal-ui` | `api.worktree.mountPath` (always rendered) |
+
+The UI image's nginx listens on port 80 and runs as the chart's non-root UID. That only works when the node
+allows unprivileged low ports (k3s does by default via `net.ipv4.ip_unprivileged_port_start=0`); on stock
+Kubernetes, rebuild the frontend with a listening port above 1024 and set `ui.service.port` to match.
 
 ## Documentation
 

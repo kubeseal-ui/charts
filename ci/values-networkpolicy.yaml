@@ -1,0 +1,23 @@
+api:
+  enableDecrypt: false
+
+networkPolicy:
+  enabled: true
+  api:
+    ingress:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+  ui:
+    ingress:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    cidrs:
+      - 10.43.0.1/32
+    otlp:
+      - 10.43.0.20/32
+
+observability:
+  otlpEndpoint: http://otel-collector.observability.svc:4317

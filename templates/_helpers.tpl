@@ -1,190 +1,200 @@
 {{/*
-Expand the name of the chart.
+Base name helpers.
 */}}
 {{- define "kubeseal-ui.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
-{{- end }}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 
-{{/*
-Create a default fully qualified app name.
-*/}}
 {{- define "kubeseal-ui.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
-{{- end }}
-
-{{- define "kubeseal-ui.apiName" -}}
-{{- printf "%s-api" (include "kubeseal-ui.fullname" .) }}
-{{- end }}
-
-{{- define "kubeseal-ui.uiName" -}}
-{{- printf "%s-ui" (include "kubeseal-ui.fullname" .) }}
-{{- end }}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 
 {{- define "kubeseal-ui.chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{- end }}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 
+{{/* Names the API Deployment, ServiceAccount, and RBAC: "<fullname>-api". */}}
+{{- define "kubeseal-ui.api.fullname" -}}
+{{- printf "%s-api" (include "kubeseal-ui.fullname" .) -}}
+{{- end -}}
+
+{{/* The Service name is fixed by the UI image's proxy_pass; it does not track
+     the release name. Override only with a rebuilt frontend image. */}}
+{{- define "kubeseal-ui.api.serviceName" -}}
+{{- default "kubeseal-ui-api" .Values.api.service.name -}}
+{{- end -}}
+
+{{- define "kubeseal-ui.api.serviceAccountName" -}}
+{{- if .Values.api.serviceAccount.create -}}
+{{- default (include "kubeseal-ui.api.fullname" .) .Values.api.serviceAccount.name -}}
+{{- else -}}
+{{- required "api.serviceAccount.name is required when api.serviceAccount.create is false" .Values.api.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Labels. Call with (dict "ctx" . "component" "api").
+*/}}
 {{- define "kubeseal-ui.labels" -}}
-helm.sh/chart: {{ include "kubeseal-ui.chart" . }}
+helm.sh/chart: {{ include "kubeseal-ui.chart" .ctx }}
 {{ include "kubeseal-ui.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/part-of: kubeseal-ui
-{{- end }}
+app.kubernetes.io/version: {{ .ctx.Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .ctx.Release.Service }}
+{{- end -}}
 
 {{- define "kubeseal-ui.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "kubeseal-ui.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
-{{- end }}
-
-{{- define "kubeseal-ui.api.selectorLabels" -}}
-{{ include "kubeseal-ui.selectorLabels" . }}
-app.kubernetes.io/component: api
-{{- end }}
-
-{{- define "kubeseal-ui.ui.selectorLabels" -}}
-{{ include "kubeseal-ui.selectorLabels" . }}
-app.kubernetes.io/component: ui
-{{- end }}
+app.kubernetes.io/name: {{ include "kubeseal-ui.name" .ctx }}
+app.kubernetes.io/instance: {{ .ctx.Release.Name }}
+app.kubernetes.io/component: {{ .component }}
+{{- end -}}
 
 {{/*
-Serialize the typed gitops credential list into the
-auth_ref:mode:username:token_file entries consumed by
-GITOPS_CREDENTIAL_REFS. Token values never appear here —
-only the Secret-mounted file paths.
+Image reference. Empty tag resolves to appVersion; a sha256: tag is a digest.
+Call with (dict "root" . "image" ...).
+*/}}
+{{- define "kubeseal-ui.image" -}}
+{{- $tag := default .root.Chart.AppVersion .image.tag -}}
+{{- if hasPrefix "sha256:" $tag -}}
+{{- printf "%s@%s" .image.repository $tag -}}
+{{- else -}}
+{{- printf "%s:%s" .image.repository $tag -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+GITOPS_CREDENTIAL_REFS: auth_ref:mode:username:token_file entries.
 */}}
 {{- define "kubeseal-ui.gitopsCredentialRefs" -}}
-{{- $entries := list -}}
+{{- $out := list -}}
 {{- range .Values.api.gitops.credentials -}}
-{{- $username := default "" .username -}}
-{{- $entries = append $entries (printf "%s:%s:%s:%s" .authRef .mode $username .tokenFile) -}}
+{{- $parts := list .authRef .mode (default "" .username) -}}
+{{- if .tokenFile -}}
+{{- $parts = append $parts .tokenFile -}}
 {{- end -}}
-{{- join "," $entries -}}
+{{- $out = append $out (join ":" $parts) -}}
+{{- end -}}
+{{- join "," $out -}}
 {{- end -}}
 
 {{/*
-Serialize the namespace gitops policy list into the
-namespace:repository:branch:path_template:auth_ref:mode[:adapter_name][:allowed_paths]
-entries consumed by GITOPS_NAMESPACES. Path templates serialize '/'
-as '-' so the ':' delimiter is unambiguous; the api's parseMappingSpecs
-restores the slashes. Tokens never appear here — only the server-side
-policy fields.
+GITOPS_NAMESPACES: namespace:repository:branch:path_template:auth_ref:mode[:adapter][:allowed_paths]
 */}}
 {{- define "kubeseal-ui.gitopsNamespaceSpecs" -}}
-{{- $entries := list -}}
+{{- $out := list -}}
 {{- range .Values.api.gitops.namespaces -}}
-{{- $path := replace "/" "-" .pathTemplate -}}
-{{- $entry := printf "%s:%s:%s:%s:%s:%s" .namespace .repository .branch $path .authRef .mode -}}
-{{- if .proposalAdapter -}}
-{{- $entry = printf "%s:%s" $entry .proposalAdapter -}}
-{{- end -}}
+{{- $parts := list .namespace .repository .branch .pathTemplate .authRef .mode -}}
+{{- if eq .mode "proposal" -}}
+{{- $parts = append $parts (default "" .proposalAdapter) -}}
 {{- if .allowedPaths -}}
-{{- $allowed := join "-" .allowedPaths -}}
-{{- $entry = printf "%s:%s" $entry $allowed -}}
+{{- $parts = append $parts (join ";" .allowedPaths) -}}
+{{- else -}}
+{{- $parts = append $parts "" -}}
 {{- end -}}
-{{- $entries = append $entries $entry -}}
+{{- else -}}
+{{- if .allowedPaths -}}
+{{- $parts = append $parts (join ";" .allowedPaths) -}}
 {{- end -}}
-{{- join "," $entries -}}
+{{- end -}}
+{{- $out = append $out (join ":" $parts) -}}
+{{- end -}}
+{{- join "," $out -}}
 {{- end -}}
 
 {{/*
-Serialize the proposal adapter list into the
-name:type:token_file[:base_url] entries consumed by
-GITOPS_PROPOSAL_ADAPTERS. Token values never appear here — only the
-Secret-mounted file path and the optional host API root.
+GITOPS_PROPOSAL_ADAPTERS: name:type:token_file[:base_url].
 */}}
 {{- define "kubeseal-ui.gitopsProposalAdapters" -}}
-{{- $entries := list -}}
+{{- $out := list -}}
 {{- range .Values.api.gitops.proposalAdapters -}}
-{{- $entry := printf "%s:%s:%s" .name .type .tokenFile -}}
+{{- $parts := list .name .type .tokenFile -}}
 {{- if .baseUrl -}}
-{{- $entry = printf "%s:%s" $entry .baseUrl -}}
+{{- $parts = append $parts .baseUrl -}}
 {{- end -}}
-{{- $entries = append $entries $entry -}}
+{{- $out = append $out (join ":" $parts) -}}
 {{- end -}}
-{{- join "," $entries -}}
-{{- end -}}
-
-{{/*
-Resolve the Secret that holds the proposal adapter tokens: its own
-proposalCredentialSecretName when set, otherwise the repository
-credential Secret.
-*/}}
-{{- define "kubeseal-ui.gitopsProposalSecretName" -}}
-{{- default .Values.api.gitops.credentialSecretName .Values.api.gitops.proposalCredentialSecretName -}}
+{{- join "," $out -}}
 {{- end -}}
 
 {{/*
-Fail the render when gitops is enabled without the pieces it needs:
-at least one namespace mapping, credentials for every mapped authRef,
-a configured adapter for every proposal namespace, a token file per
-declared adapter, and a Secret to mount them from.
+Fail-closed values validation. The api refuses a boot it cannot serve; the
+chart refuses a render the api could not boot from, so a bad upgrade leaves
+the previous release running.
 */}}
-{{- define "kubeseal-ui.gitops.validate" -}}
-{{- if .Values.api.gitops.enabled -}}
-{{- if not .Values.api.gitops.namespaces -}}
-{{- fail "api.gitops.enabled requires api.gitops.namespaces" -}}
+{{- define "kubeseal-ui.validate" -}}
+{{- if kindIs "invalid" .Values.api.enableDecrypt -}}
+{{- fail "api.enableDecrypt must be set explicitly to true or false" -}}
 {{- end -}}
-{{- $creds := dict -}}
-{{- range .Values.api.gitops.credentials -}}
-{{- $_ := set $creds .authRef . -}}
-{{- if and (eq .mode "https-token") (not .tokenFile) -}}
-{{- fail (printf "credential %s: https-token requires tokenFile" .authRef) -}}
+{{- $g := .Values.api.gitops -}}
+{{- if $g.enabled -}}
+{{- if not $g.namespaces -}}
+{{- fail "api.gitops.enabled requires at least one api.gitops.namespaces entry" -}}
 {{- end -}}
-{{- if and (ne .mode "https-token") (ne .mode "ssh-agent") (ne .mode "none") -}}
-{{- fail (printf "credential %s: unknown mode %s" .authRef .mode) -}}
-{{- end -}}
-{{- end -}}
-{{- $adapters := dict -}}
-{{- range .Values.api.gitops.proposalAdapters -}}
-{{- if not .name -}}
-{{- fail "proposalAdapters entry requires name" -}}
-{{- end -}}
-{{- if hasKey $adapters .name -}}
-{{- fail (printf "duplicate proposal adapter name %s" .name) -}}
-{{- end -}}
-{{- $_ := set $adapters .name . -}}
-{{- if not (eq .type "github") -}}
-{{- fail (printf "proposal adapter %s: type must be github, got %s" .name .type) -}}
-{{- end -}}
-{{- if not .tokenFile -}}
-{{- fail (printf "proposal adapter %s: tokenFile is required" .name) -}}
-{{- end -}}
-{{- end -}}
-{{- range .Values.api.gitops.namespaces -}}
-{{- if not (hasKey $creds .authRef) -}}
-{{- fail (printf "namespace %s: no credential for authRef %s" .namespace .authRef) -}}
-{{- end -}}
-{{- if and (ne .mode "direct") (ne .mode "proposal") -}}
-{{- fail (printf "namespace %s: mode must be direct or proposal" .namespace) -}}
-{{- end -}}
-{{- if eq .mode "proposal" -}}
-{{- if not (hasKey . "proposalAdapter") -}}
-{{- fail (printf "namespace %s: proposal mode requires proposalAdapter" .namespace) -}}
-{{- end -}}
-{{- if not (hasKey $adapters .proposalAdapter) -}}
-{{- fail (printf "namespace %s: proposalAdapter %s is not declared in api.gitops.proposalAdapters" .namespace .proposalAdapter) -}}
-{{- end -}}
-{{- else if .proposalAdapter -}}
-{{- fail (printf "namespace %s: direct mode must not declare proposalAdapter" .namespace) -}}
-{{- end -}}
-{{- end -}}
-{{- if not .Values.api.gitops.credentialSecretName -}}
+{{- if not $g.credentialSecretName -}}
 {{- fail "api.gitops.enabled requires api.gitops.credentialSecretName" -}}
 {{- end -}}
-{{- if and .Values.api.gitops.proposalAdapters (not (include "kubeseal-ui.gitopsProposalSecretName" .)) -}}
-{{- fail "api.gitops.proposalAdapters requires api.gitops.proposalCredentialSecretName (or credentialSecretName)" -}}
+{{- if and $g.worktreeDir (not (hasPrefix .Values.api.worktree.mountPath $g.worktreeDir)) -}}
+{{- fail (printf "api.gitops.worktreeDir %q must be inside api.worktree.mountPath %q" $g.worktreeDir .Values.api.worktree.mountPath) -}}
+{{- end -}}
+{{- $refs := dict -}}
+{{- range $g.credentials -}}
+{{- if not .authRef -}}
+{{- fail "each api.gitops.credentials entry needs an authRef" -}}
+{{- end -}}
+{{- if not (has .mode (list "https-token" "ssh-agent" "none")) -}}
+{{- fail (printf "credential %q: unknown mode %q (https-token, ssh-agent, none)" .authRef .mode) -}}
+{{- end -}}
+{{- if and (eq .mode "https-token") (not .tokenFile) -}}
+{{- fail (printf "credential %q: https-token requires tokenFile" .authRef) -}}
+{{- end -}}
+{{- $_ := set $refs .authRef true -}}
+{{- end -}}
+{{- $adapters := dict -}}
+{{- range $g.proposalAdapters -}}
+{{- if not .name -}}
+{{- fail "each api.gitops.proposalAdapters entry needs a name" -}}
+{{- end -}}
+{{- if hasKey $adapters .name -}}
+{{- fail (printf "duplicate proposal adapter %q" .name) -}}
+{{- end -}}
+{{- $_ := set $adapters .name true -}}
+{{- if ne .type "github" -}}
+{{- fail (printf "proposal adapter %q: unknown type %q (github)" .name .type) -}}
+{{- end -}}
+{{- if not .tokenFile -}}
+{{- fail (printf "proposal adapter %q requires tokenFile" .name) -}}
+{{- end -}}
+{{- end -}}
+{{- if and $g.proposalAdapters (not (or $g.proposalCredentialSecretName $g.credentialSecretName)) -}}
+{{- fail "proposal adapters require proposalCredentialSecretName or credentialSecretName" -}}
+{{- end -}}
+{{- range $g.namespaces -}}
+{{- if not (has .mode (list "direct" "proposal")) -}}
+{{- fail (printf "namespace %q: mode must be direct or proposal" .namespace) -}}
+{{- end -}}
+{{- if not (hasKey $refs .authRef) -}}
+{{- fail (printf "namespace %q maps to undeclared credential %q" .namespace .authRef) -}}
+{{- end -}}
+{{- if eq .mode "proposal" -}}
+{{- if not .proposalAdapter -}}
+{{- fail (printf "namespace %q: proposal mode requires proposalAdapter" .namespace) -}}
+{{- end -}}
+{{- if not (hasKey $adapters .proposalAdapter) -}}
+{{- fail (printf "namespace %q names undeclared adapter %q" .namespace .proposalAdapter) -}}
+{{- end -}}
+{{- else -}}
+{{- if .proposalAdapter -}}
+{{- fail (printf "namespace %q: direct mode must not set proposalAdapter" .namespace) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -36,16 +36,17 @@ jobs:
 
     - name: Lint Helm chart
       run: |
-        helm lint .
+        helm lint . --set api.enableDecrypt=false
         echo "Helm chart is valid"
 
     - name: Template Helm chart (dry-run)
       run: |
-        helm template test-release . --dry-run --debug > /dev/null
+        helm template test-release . --set api.enableDecrypt=false > /tmp/rendered.yaml
+        kubeconform -strict -summary /tmp/rendered.yaml
         echo "Helm template renders successfully"
 
     - name: Validate rendered chart contracts
-      run: scripts/validate.sh
+      run: bash scripts/validate.sh
 
   security:
     name: Security Scan

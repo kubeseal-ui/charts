@@ -1,91 +1,114 @@
-{{- include "kubeseal-ui.gitops.validate" . -}}
+{{- include "kubeseal-ui.validate" . }}
+{{- $g := .Values.api.gitops }}
+{{- $env := dict }}
+{{- range $key, $value := .Values.api.env }}
+{{- $_ := set $env $key (toString $value) }}
+{{- end }}
+{{- $_ := set $env "KUBESEAL_API_PORT" (toString .Values.api.service.port) }}
+{{- $_ := set $env "ENABLE_DECRYPT" (toString .Values.api.enableDecrypt) }}
+{{- $_ := set $env "LOG_LEVEL" .Values.api.logLevel }}
+{{- $_ := set $env "KUBESEAL_API_TIMEOUT_SECONDS" (toString .Values.api.apiTimeoutSeconds) }}
+{{- $_ := set $env "KUBESEAL_CONTROLLER_NAMESPACE" .Values.api.controllerNamespace }}
+{{- $_ := set $env "KUBESEAL_ACTIVE_KEY_LABEL" .Values.api.controllerKeyLabel }}
+{{- if .Values.api.certURL }}
+{{- $_ := set $env "KUBESEAL_CERT_URL" .Values.api.certURL }}
+{{- end }}
+{{- if .Values.api.policy.existingConfigMap }}
+{{- $_ := set $env "CONFIG_PATH" (printf "%s/%s" .Values.api.policy.mountPath .Values.api.policy.fileName) }}
+{{- end }}
+{{- if $g.enabled }}
+{{- $_ := set $env "GITOPS_ENABLED" "true" }}
+{{- $_ := set $env "GITOPS_AUTHOR_NAME" $g.authorName }}
+{{- if $g.authorEmail }}
+{{- $_ := set $env "GITOPS_AUTHOR_EMAIL" $g.authorEmail }}
+{{- end }}
+{{- $_ := set $env "GITOPS_WORKTREE_DIR" $g.worktreeDir }}
+{{- $_ := set $env "GITOPS_CREDENTIAL_REFS" (include "kubeseal-ui.gitopsCredentialRefs" .) }}
+{{- $_ := set $env "GITOPS_NAMESPACES" (include "kubeseal-ui.gitopsNamespaceSpecs" .) }}
+{{- if $g.proposalAdapters }}
+{{- $_ := set $env "GITOPS_PROPOSAL_ADAPTERS" (include "kubeseal-ui.gitopsProposalAdapters" .) }}
+{{- end }}
+{{- end }}
+{{- if .Values.observability.otlpEndpoint }}
+{{- $_ := set $env "OTEL_EXPORTER_OTLP_ENDPOINT" (regexReplaceAll "^https?://" .Values.observability.otlpEndpoint "") }}
+{{- $_ := set $env "OTEL_SERVICE_NAME" (include "kubeseal-ui.api.fullname" .) }}
+{{- $_ := set $env "OTEL_SERVICE_VERSION" (default .Chart.AppVersion .Values.api.image.tag) }}
+{{- $_ := set $env "OTEL_DEPLOYMENT_ENVIRONMENT" .Release.Namespace }}
+{{- end }}
+{{- if .Values.observability.traceSampleRatio }}
+{{- $_ := set $env "OTEL_TRACE_SAMPLE_RATIO" (toString .Values.observability.traceSampleRatio) }}
+{{- end }}
+{{- if .Values.observability.metricIntervalSeconds }}
+{{- $_ := set $env "OTEL_METRIC_INTERVAL_SECONDS" (toString .Values.observability.metricIntervalSeconds) }}
+{{- end }}
+{{- /* Each token file's directory is mounted from the Secret that holds it. */}}
+{{- $secretMounts := dict }}
+{{- range $g.credentials }}
+{{- if .tokenFile }}
+{{- $_ := set $secretMounts (dir .tokenFile) $.Values.api.gitops.credentialSecretName }}
+{{- end }}
+{{- end }}
+{{- $proposalSecret := default $g.credentialSecretName $g.proposalCredentialSecretName }}
+{{- range $g.proposalAdapters }}
+{{- if .tokenFile }}
+{{- $d := dir .tokenFile }}
+{{- if and (hasKey $secretMounts $d) (ne (get $secretMounts $d) $proposalSecret) }}
+{{- fail (printf "token directory %q would be mounted from two different Secrets" $d) }}
+{{- end }}
+{{- $_ := set $secretMounts $d $proposalSecret }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "kubeseal-ui.apiName" . }}
+  name: {{ include "kubeseal-ui.api.fullname" . }}
   labels:
-{{ include "kubeseal-ui.labels" . | nindent 4 }}
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
 spec:
-{{- if not .Values.api.autoscaling.enabled }}
   replicas: {{ .Values.api.replicaCount }}
-{{- end }}
   selector:
     matchLabels:
-{{ include "kubeseal-ui.api.selectorLabels" . | nindent 6 }}
+      {{- include "kubeseal-ui.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
   template:
     metadata:
       labels:
-{{ include "kubeseal-ui.api.selectorLabels" . | nindent 8 }}
+        {{- include "kubeseal-ui.selectorLabels" (dict "ctx" . "component" "api") | nindent 8 }}
+        {{- with .Values.api.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.api.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
-      serviceAccountName: {{ include "kubeseal-ui.apiName" . }}
-{{- with .Values.api.imagePullSecrets }}
-      imagePullSecrets:
-{{ toYaml . | nindent 8 }}
-{{- end }}
+      serviceAccountName: {{ include "kubeseal-ui.api.serviceAccountName" . }}
       securityContext:
-{{ toYaml .Values.api.podSecurityContext | nindent 8 }}
+        {{- toYaml .Values.api.podSecurityContext | nindent 8 }}
       containers:
         - name: api
-          image: "{{ .Values.api.image.repository }}:{{ default .Chart.AppVersion (default "" .Values.api.image.tag) }}"
+          image: {{ include "kubeseal-ui.image" (dict "root" . "image" .Values.api.image) }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:
-{{ toYaml .Values.api.securityContext | nindent 12 }}
+            {{- toYaml .Values.api.securityContext | nindent 12 }}
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: {{ .Values.api.service.port }}
               protocol: TCP
           env:
-            - name: KUBESEAL_API_PORT
-              value: "8080"
-            - name: LOG_LEVEL
-              value: {{ .Values.api.env.LOG_LEVEL | quote }}
-            - name: OIDC_ISSUER
-              value: {{ .Values.api.env.OIDC_ISSUER | quote }}
-            - name: OIDC_CLIENT_ID
-              value: {{ .Values.api.env.OIDC_CLIENT_ID | quote }}
-            - name: ENABLE_DECRYPT
-              value: {{ .Values.api.enableDecrypt | quote }}
-            - name: KUBESEAL_CONTROLLER_NAMESPACE
-              value: {{ .Values.api.controllerNamespace | quote }}
-            - name: KUBESEAL_ACTIVE_KEY_LABEL
-              value: {{ .Values.api.activeKeyLabel | quote }}
-            - name: GITOPS_ENABLED
-              value: {{ .Values.api.gitops.enabled | quote }}
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ trimPrefix "http://" .Values.observability.otlpEndpoint | quote }}
-            - name: OTEL_SERVICE_NAME
-              value: {{ include "kubeseal-ui.apiName" . | quote }}
-            - name: OTEL_SERVICE_VERSION
-              value: {{ default .Chart.AppVersion (default "" .Values.api.image.tag) | quote }}
-            - name: OTEL_DEPLOYMENT_ENVIRONMENT
-              value: {{ .Release.Namespace | quote }}
-            {{- if .Values.observability.traceSampleRatio }}
-            - name: OTEL_TRACE_SAMPLE_RATIO
-              value: {{ .Values.observability.traceSampleRatio | quote }}
+            {{- range $key := keys $env | sortAlpha }}
+            - name: {{ $key }}
+              value: {{ get $env $key | quote }}
             {{- end }}
-            {{- if .Values.observability.metricIntervalSeconds }}
-            - name: OTEL_METRIC_INTERVAL_SECONDS
-              value: {{ .Values.observability.metricIntervalSeconds | quote }}
+            {{- with .Values.api.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
-            - name: GITOPS_AUTHOR_NAME
-              value: {{ .Values.api.gitops.authorName | quote }}
-            - name: GITOPS_AUTHOR_EMAIL
-              value: {{ .Values.api.gitops.authorEmail | quote }}
-            - name: GITOPS_WORKTREE_DIR
-              value: {{ .Values.api.gitops.worktreeDir | quote }}
-            - name: GITOPS_CREDENTIAL_REFS
-              value: {{ include "kubeseal-ui.gitopsCredentialRefs" . | quote }}
-            {{- if .Values.api.gitops.enabled }}
-            - name: GITOPS_NAMESPACES
-              value: {{ include "kubeseal-ui.gitopsNamespaceSpecs" . | quote }}
-            {{- if .Values.api.gitops.proposalAdapters }}
-            - name: GITOPS_PROPOSAL_ADAPTERS
-              value: {{ include "kubeseal-ui.gitopsProposalAdapters" . | quote }}
-            {{- end }}
-            {{- end }}
+          {{- with .Values.api.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           livenessProbe:
             httpGet:
-              path: {{ .Values.api.probes.liveness.path }}
+              path: /healthz
               port: http
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -93,45 +116,61 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: {{ .Values.api.probes.readiness.path }}
+              path: /readyz
               port: http
             initialDelaySeconds: 5
-            periodSeconds: 10
+            periodSeconds: 30
             timeoutSeconds: 3
             failureThreshold: 3
           resources:
-{{ toYaml .Values.api.resources | nindent 12 }}
+            {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:
             - name: worktree
-              mountPath: /tmp/kubeseal-ui
-            {{- if .Values.api.gitops.enabled }}
-            {{- range .Values.api.gitops.credentials }}
-            {{- if .tokenFile }}
-            - name: git-credentials
-              mountPath: {{ dir .tokenFile }}
+              mountPath: {{ .Values.api.worktree.mountPath }}
+            {{- if .Values.api.policy.existingConfigMap }}
+            - name: authz
+              mountPath: {{ .Values.api.policy.mountPath }}
               readOnly: true
             {{- end }}
-            {{- end }}
-            {{- range .Values.api.gitops.proposalAdapters }}
-            {{- if .tokenFile }}
-            - name: git-proposal-credentials
-              mountPath: {{ dir .tokenFile }}
+            {{- range $path, $secret := $secretMounts }}
+            - name: git-{{ $path | sha256sum | trunc 8 }}
+              mountPath: {{ $path }}
               readOnly: true
             {{- end }}
-            {{- end }}
+            {{- with .Values.api.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - name: worktree
           emptyDir:
-            sizeLimit: {{ .Values.worktree.emptyDir.sizeLimit }}
-        {{- if and .Values.api.gitops.enabled .Values.api.gitops.credentialSecretName }}
-        - name: git-credentials
-          secret:
-            secretName: {{ .Values.api.gitops.credentialSecretName }}
+            {{- with .Values.api.worktree.emptyDir.sizeLimit }}
+            sizeLimit: {{ . }}
+            {{- else }}
+            {}
+            {{- end }}
+        {{- if .Values.api.policy.existingConfigMap }}
+        - name: authz
+          configMap:
+            name: {{ .Values.api.policy.existingConfigMap }}
         {{- end }}
-        {{- if and .Values.api.gitops.enabled .Values.api.gitops.proposalAdapters }}
-        - name: git-proposal-credentials
+        {{- range $path, $secret := $secretMounts }}
+        - name: git-{{ $path | sha256sum | trunc 8 }}
           secret:
-            secretName: {{ include "kubeseal-ui.gitopsProposalSecretName" . }}
+            secretName: {{ $secret }}
         {{- end }}
+        {{- with .Values.api.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: 30

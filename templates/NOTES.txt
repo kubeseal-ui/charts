@@ -1,0 +1,34 @@
+kubeseal-ui {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Components:
+  API  {{ include "kubeseal-ui.api.serviceName" . }}:{{ .Values.api.service.port }}
+  UI   {{ include "kubeseal-ui.fullname" . }}:{{ .Values.ui.service.port }}   (proxies /api to the API Service)
+
+The chart ships no Ingress. Route the browser origin to the UI Service and
+/api to the API Service; cookies are Secure and HttpOnly, so the UI must be
+reached over HTTPS and CSRF_TRUSTED_ORIGINS must name that origin.
+
+{{- if not .Values.api.enableDecrypt }}
+
+Reveal is disabled (api.enableDecrypt=false). Creating and editing
+SealedSecrets work without it; turn it on only where reveal is intended,
+because it also renders Secret list/get in the controller namespace.
+{{- end }}
+
+{{- if not .Values.api.policy.existingConfigMap }}
+
+CONFIG_PATH is not set, so capabilities come only from OIDC groups named
+exactly after a built-in role (viewer, editor, secret-manager,
+release-proposer, release-pusher, platform-admin). To map groups to roles
+and namespaces, mount a policy document and set api.policy.existingConfigMap.
+{{- end }}
+
+{{- if not .Values.api.gitops.enabled }}
+
+GitOps is disabled: the API boots, but every namespace answers "mapping not
+found" until api.gitops.enabled is set with at least one namespace mapping.
+{{- end }}
+
+Verify:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "kubeseal-ui.api.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "kubeseal-ui.fullname" . }}

@@ -1,0 +1,70 @@
+{{- include "kubeseal-ui.validate" . }}
+{{- /*
+Base RBAC is read-only: namespaces, and SealedSecrets in every namespace.
+No write verbs exist anywhere in this chart. If the service account is
+pre-created, bind that one rather than rendering a second account.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubeseal-ui.api.fullname" . }}
+  labels:
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+rules:
+  - apiGroups: ["bitnami.com"]
+    resources: ["sealedsecrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubeseal-ui.api.fullname" . }}
+  labels:
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeseal-ui.api.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeseal-ui.api.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.api.enableDecrypt }}
+---
+{{- /*
+Reveal reads the controller's private key from a Secret in the controller
+namespace. Kubernetes RBAC cannot filter by label, so list here exposes every
+Secret in that namespace; it is rendered only when decrypt is enabled on
+purpose. Creating and editing never need it.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kubeseal-ui.api.fullname" . }}-controller-key
+  namespace: {{ required "api.controllerNamespace is required when api.enableDecrypt is true" .Values.api.controllerNamespace }}
+  labels:
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kubeseal-ui.api.fullname" . }}-controller-key
+  namespace: {{ .Values.api.controllerNamespace }}
+  labels:
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kubeseal-ui.api.fullname" . }}-controller-key
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeseal-ui.api.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

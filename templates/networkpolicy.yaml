@@ -1,33 +1,33 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- if and (not .Values.networkPolicy.egress.cidrs) (not .Values.networkPolicy.egress.namespaceSelectors) }}
-{{- fail "networkPolicy.enabled requires networkPolicy.egress.cidrs or networkPolicy.egress.namespaceSelectors (the Kubernetes API, OIDC issuer, Git remotes, and proposal APIs are environment specific)" }}
+{{- fail "networkPolicy.enabled requires networkPolicy.egress.cidrs or networkPolicy.egress.namespaceSelectors" }}
 {{- end }}
-{{- $apiPort := .Values.api.service.port | int }}
+{{- /*
+The api reaches the Kubernetes API, the OIDC issuer, Git remotes, proposal
+APIs, and the certificate provider. Those destinations are environment
+specific, so the chart renders what is declared and refuses to guess.
+*/}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "kubeseal-ui.apiName" . }}
+  name: {{ include "kubeseal-ui.api.fullname" . }}
   labels:
-{{ include "kubeseal-ui.labels" . | nindent 4 }}
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-{{ include "kubeseal-ui.api.selectorLabels" . | nindent 6 }}
+      {{- include "kubeseal-ui.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
   policyTypes:
     - Ingress
     - Egress
   ingress:
     {{- with .Values.networkPolicy.api.ingress }}
-    {{- toYaml . | nindent 4 }}
+    - from:
+        {{- toYaml . | nindent 8 }}
     {{- else }}
-    # No sources configured: every pod may reach the API port. Set
-    # networkPolicy.api.ingress to restrict traffic to a controller or a
-    # fixed client set.
     - {}
     {{- end }}
   egress:
-    # Cluster DNS is always required; without this rule every service
-    # lookup fails.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -37,63 +37,47 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    {{- if .Values.observability.otlpEndpoint }}
-    # OTLP gRPC to the collector. The endpoint is operator-supplied, so
-    # the destination CIDR/selector comes from the networkPolicy block.
-    {{- with .Values.networkPolicy.egress.otlp }}
     - to:
-      {{- range . }}
+        {{- range .Values.networkPolicy.egress.cidrs }}
         - ipBlock:
             cidr: {{ . }}
-      {{- end }}
+        {{- end }}
+        {{- range .Values.networkPolicy.egress.namespaceSelectors }}
+        - namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+    {{- if and .Values.observability.otlpEndpoint .Values.networkPolicy.egress.otlp }}
+    - to:
+        {{- range .Values.networkPolicy.egress.otlp }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 4317
-    {{- end }}
-    {{- end }}
-    {{- with .Values.networkPolicy.egress.cidrs }}
-    - to:
-      {{- range . }}
-        - ipBlock:
-            cidr: {{ . }}
-      {{- end }}
-      ports:
-        - protocol: TCP
-          port: 443
-    {{- end }}
-    {{- with .Values.networkPolicy.egress.namespaceSelectors }}
-    - to:
-      {{- range . }}
-        - namespaceSelector:
-{{ toYaml . | nindent 12 }}
-      {{- end }}
-      ports:
-        - protocol: TCP
-          port: 443
     {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "kubeseal-ui.uiName" . }}
+  name: {{ include "kubeseal-ui.fullname" . }}
   labels:
-{{ include "kubeseal-ui.labels" . | nindent 4 }}
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "ui") | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-{{ include "kubeseal-ui.ui.selectorLabels" . | nindent 6 }}
+      {{- include "kubeseal-ui.selectorLabels" (dict "ctx" . "component" "ui") | nindent 6 }}
   policyTypes:
     - Ingress
     - Egress
   ingress:
     {{- with .Values.networkPolicy.ui.ingress }}
-    {{- toYaml . | nindent 4 }}
+    - from:
+        {{- toYaml . | nindent 8 }}
     {{- else }}
     - {}
     {{- end }}
   egress:
-    # The UI pods serve static assets and proxy the API: DNS plus the
-    # in-cluster API service, nothing else.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -103,11 +87,18 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    {{- /*
+    The UI image proxies /api to the API Service in its own namespace, so
+    that one destination is derived rather than operator-supplied.
+    */}}
     - to:
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-{{ include "kubeseal-ui.api.selectorLabels" . | nindent 14 }}
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "kubeseal-ui.selectorLabels" (dict "ctx" . "component" "api") | nindent 14 }}
       ports:
         - protocol: TCP
-          port: {{ $apiPort }}
+          port: {{ .Values.api.service.port }}
 {{- end }}
