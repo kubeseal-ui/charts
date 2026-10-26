@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeseal-ui.api.serviceName" . }}
+  labels:
+    {{- include "kubeseal-ui.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  type: {{ .Values.api.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      protocol: TCP
+      targetPort: http
+  selector:
+    {{- include "kubeseal-ui.selectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}

@@ -1,0 +1,201 @@
+# Default values for kubeseal-ui.
+#
+# The UI image hard-codes proxy_pass http://kubeseal-ui-api:8080, so the API
+# Service is named kubeseal-ui-api regardless of the release name. Every other
+# resource follows the release (api.fullname = <fullname>-api). Override
+# api.service.name only with a UI image rebuilt for a different name.
+
+nameOverride: ""
+fullnameOverride: ""
+
+api:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/kubeseal-ui/api
+    # Empty resolves to appVersion, a -dev marker with no published image.
+    # Pin a tag or digest (sha256:...) per environment.
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    # Fixed by the UI image's proxy_pass; leave empty.
+    name: ""
+    # Also the container port and KUBESEAL_API_PORT.
+    port: 8080
+
+  serviceAccount:
+    create: true
+    # Empty derives "<fullname>-api".
+    name: ""
+    annotations: {}
+
+  podAnnotations: {}
+  podLabels: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+    capabilities:
+      drop: [ALL]
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Required, with no default. Reveal needs true, and the controller-key RBAC
+  # renders only then. Creating and editing SealedSecrets work either way.
+  enableDecrypt: null
+
+  # The authorization document (its authz: half). The chart mounts an existing
+  # ConfigMap at mountPath and points CONFIG_PATH at fileName; it renders no
+  # ConfigMap, so an unmounted file cannot silently become the policy.
+  policy:
+    existingConfigMap: ""
+    mountPath: /etc/kubeseal-ui
+    fileName: acl.yaml
+
+  controllerNamespace: cluster
+  controllerKeyLabel: sealedsecrets.bitnami.com/sealed-secrets-key
+  # The controller's public certificate. Encryption fails until this resolves;
+  # no Secret RBAC is involved.
+  certURL: http://sealed-secrets-controller.kube-system.svc.cluster.local:8080/v1/cert.pem
+
+  # Enforced by the api: 5-120. Invalid values fail startup.
+  apiTimeoutSeconds: 30
+  logLevel: info
+
+  # Extra environment. `env` is a map of plain values (e.g. OIDC_ISSUER) and
+  # cannot override the variables the chart derives from its own values.
+  # `extraEnv` takes verbatim entries (for valueFrom) and is rendered after
+  # them, so do not repeat a derived name there.
+  env: {}
+  extraEnv: []
+  extraEnvFrom: []
+
+  # The api writes its Git worktrees under this emptyDir. With a read-only
+  # root filesystem it is the only writable path the container has, so
+  # api.gitops.worktreeDir must lie inside it (the chart refuses otherwise).
+  worktree:
+    mountPath: /tmp/kubeseal-ui
+    emptyDir:
+      sizeLimit: 1Gi
+
+  gitops:
+    enabled: false
+    authorName: kubeseal-ui
+    authorEmail: ""
+    worktreeDir: /tmp/kubeseal-ui/gitops
+    # Secret holding the credential token files, mounted at each file's
+    # directory. Required when gitops is enabled.
+    credentialSecretName: ""
+    # Falls back to credentialSecretName.
+    proposalCredentialSecretName: ""
+    # Token values never appear here; only Secret-mounted paths.
+    #   authRef, mode (https-token | ssh-agent | none), username, tokenFile
+    credentials: []
+    # namespace:repository:branch:path_template:auth_ref:mode[:adapter][:allowed_paths]
+    # Rendering that spec is derived from these entries.
+    namespaces: []
+    # name:type:token_file[:base_url]; type is github.
+    proposalAdapters: []
+
+  extraVolumes: []
+  extraVolumeMounts: []
+
+ui:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/kubeseal-ui/frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  podAnnotations: {}
+  podLabels: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+    capabilities:
+      drop: [ALL]
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+observability:
+  # OTLP gRPC host:port, no scheme. Empty disables the SDK and leaves
+  # /metrics at 503.
+  otlpEndpoint: ""
+  # 0..1; empty keeps the api default of 0.1.
+  traceSampleRatio: ""
+  # Seconds; empty keeps the api default of 30.
+  metricIntervalSeconds: ""
+  serviceMonitor:
+    enabled: false
+    # Labels the Prometheus operator selects ServiceMonitors by.
+    selector: {}
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+  prometheusRule:
+    enabled: false
+    selector: {}
+    labels: {}
+
+networkPolicy:
+  enabled: false
+  dnsNamespace: kube-system
+  api:
+    # Empty admits every pod. Narrow for production.
+    ingress: []
+  ui:
+    ingress: []
+  egress:
+    # The Kubernetes API, OIDC issuer, Git remotes, proposal APIs, and the
+    # certificate provider. At least one destination is required when the
+    # policy is enabled: the chart will not guess a cluster's CIDRs.
+    cidrs: []
+    namespaceSelectors: []
+    # Collector destinations; port 4317 renders only when otlpEndpoint is set.
+    otlp: []

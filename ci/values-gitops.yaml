@@ -1,0 +1,33 @@
+api:
+  enableDecrypt: false
+  gitops:
+    enabled: true
+    authorEmail: kubeseal-ui@example.com
+    credentialSecretName: kubeseal-ui-git
+    proposalCredentialSecretName: kubeseal-ui-proposal
+    credentials:
+      - authRef: platform-repo
+        mode: https-token
+        username: kubeseal-ui
+        tokenFile: /var/run/secrets/git/platform/token
+    namespaces:
+      - namespace: payments
+        repository: example/config
+        branch: main
+        pathTemplate: "cluster/sealed-secret/{namespace}/{name}.yaml"
+        authRef: platform-repo
+        mode: direct
+      - namespace: development
+        repository: example/config
+        branch: main
+        pathTemplate: "cluster/sealed-secret/{namespace}/{name}.yaml"
+        authRef: platform-repo
+        mode: proposal
+        proposalAdapter: github-main
+        allowedPaths:
+          - cluster
+    proposalAdapters:
+      - name: github-main
+        type: github
+        tokenFile: /var/run/secrets/git/proposal/token
+        baseUrl: https://git.example.com/api/v3

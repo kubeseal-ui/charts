@@ -1,0 +1,15 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Helm rendered output
+*.rendered.yaml
+# Local values overrides
+values.local.yaml
+values-override.yaml

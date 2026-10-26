@@ -1,0 +1,15 @@
+api:
+  enableDecrypt: false
+
+observability:
+  otlpEndpoint: http://otel-collector.observability.svc:4317
+  traceSampleRatio: "0.25"
+  metricIntervalSeconds: 15
+  serviceMonitor:
+    enabled: true
+    selector:
+      release: prometheus
+  prometheusRule:
+    enabled: true
+    selector:
+      release: prometheus

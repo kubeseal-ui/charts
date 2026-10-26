@@ -1,0 +1,20 @@
+# Homelab (cluster namespace) values for kubeseal-ui.
+# Mirrors the cluster/kube conventions: Harbor registry mirror,
+# Authentik OIDC issuer, plain ClusterIP services fronted by the
+# Traefik IngressRoute in ingressroute.yaml.
+api:
+  image:
+    repository: reg.ygnv.my.id/ghcr/kubeseal-ui/api
+    tag: "dev"
+    pullPolicy: IfNotPresent
+  env:
+    OIDC_ISSUER: "https://auth.ygnv.my.id/application/o/kubeseal-ui/"
+    OIDC_CLIENT_ID: "kubeseal-ui"
+    LOG_LEVEL: "info"
+  controllerNamespace: kube-system
+
+ui:
+  image:
+    repository: reg.ygnv.my.id/ghcr/kubeseal-ui/frontend
+    tag: "dev"
+    pullPolicy: IfNotPresent
